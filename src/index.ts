@@ -12,6 +12,7 @@ export interface Env extends EngineEnv {
   BATCH_SIZE: string;
   DAILY_CRON: string;
   ADMIN_TOKEN?: string;
+  MAX_DAILY_USD?: string;
 }
 
 const HTML = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' };

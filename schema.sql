@@ -59,7 +59,11 @@ CREATE TABLE IF NOT EXISTS runs (
   citations TEXT,
   detected TEXT,
   outcome TEXT,
-  error TEXT
+  error TEXT,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  search_calls INTEGER,
+  cost_usd REAL
 );
 CREATE INDEX IF NOT EXISTS runs_ts ON runs(ts);
 CREATE INDEX IF NOT EXISTS runs_prompt ON runs(prompt_id, engine);

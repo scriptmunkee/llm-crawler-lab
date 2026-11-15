@@ -1,7 +1,7 @@
 import { getCanaries, initCanaries } from './canaries';
 import { ENGINES, hasKey, isEnabled } from './engines';
 import { LAB_URL_PATHS } from './pages';
-import { enqueue, processJobs } from './runner';
+import { enqueue, processJobs, spendToday } from './runner';
 import { prompts } from './tests';
 import type { Env } from './index';
 import SCHEMA from '../schema.sql';
@@ -124,6 +124,29 @@ async function dashboard(env: Env, msg: string | null): Promise<string> {
   const ON = ENGINES.filter((e) => isEnabled(env, e));
   const defs = prompts(c, env.SITE_ORIGIN);
 
+  // Spend
+  const day = new Date().toISOString().slice(0, 10);
+  const d7 = new Date(Date.now() - 7 * 86400_000).toISOString();
+  const spend = await env.DB.prepare(
+    `SELECT engine,
+       SUM(CASE WHEN ts >= ? THEN COALESCE(cost_usd,0) ELSE 0 END) today,
+       SUM(CASE WHEN ts >= ? THEN COALESCE(cost_usd,0) ELSE 0 END) week,
+       SUM(COALESCE(cost_usd,0)) month,
+       COUNT(*) runs, SUM(COALESCE(search_calls,0)) searches,
+       SUM(COALESCE(input_tokens,0)) tin, SUM(COALESCE(output_tokens,0)) tout,
+       AVG(cost_usd) per_run
+     FROM runs WHERE ts >= ? AND status = 'ok' GROUP BY engine`,
+  ).bind(day, d7, since).all<any>();
+  const usd = (v: number | null | undefined) => (v == null ? '<span class="muted">n/a</span>' : `$${Number(v).toFixed(v < 1 ? 4 : 2)}`);
+  const repeats = Math.max(1, parseInt(env.REPEATS || '3', 10));
+  const spendRows = spend.results.map((s: any) => [
+    esc(s.engine), usd(s.today), usd(s.week), usd(s.month), s.runs, s.searches,
+    `${Math.round(s.tin / 1000)}k / ${Math.round(s.tout / 1000)}k`, usd(s.per_run),
+    s.per_run == null ? '<span class="muted">n/a</span>' : usd(s.per_run * defs.length * repeats * 30),
+  ]);
+  const today = await spendToday(env);
+  const cap = parseFloat(env.MAX_DAILY_USD || '0');
+
   // Test 1: per engine, share of OK runs that saw each code
   const t1Labels = ['html', 'js', 'jsDelayed', 'fetched'];
   const t1Rows = ON.map((e) => {
@@ -157,7 +180,7 @@ async function dashboard(env: Env, msg: string | null): Promise<string> {
     `SELECT path, bot, COUNT(*) n, MAX(ts) last FROM hits WHERE ts > ? AND bot_group != 'human' GROUP BY path, bot ORDER BY path, n DESC`,
   ).bind(since).all<{ path: string; bot: string; n: number; last: string }>();
   const recentHits = await env.DB.prepare('SELECT ts, path, status, bot, verified_category, as_org, ua FROM hits ORDER BY id DESC LIMIT 40').all<any>();
-  const recentRuns = await env.DB.prepare('SELECT ts, prompt_id, engine, model, status, outcome, latency_ms, answer, queries, fetched, citations, sources, error FROM runs ORDER BY id DESC LIMIT 30').all<any>();
+  const recentRuns = await env.DB.prepare('SELECT ts, prompt_id, engine, model, status, outcome, latency_ms, answer, queries, fetched, citations, sources, error, cost_usd FROM runs ORDER BY id DESC LIMIT 30').all<any>();
 
   const codeRows: (string | number)[][] = [
     ['T1 HTML', `<code>${c.t1.html}</code>`], ['T1 JS', `<code>${c.t1.js}</code>`], ['T1 JS delayed', `<code>${c.t1.jsDelayed}</code>`], ['T1 fetched', `<code>${c.t1.fetched}</code>`],
@@ -177,6 +200,11 @@ ${table(['Engine', 'Status', 'Model'], engineRows)}
 <a class="btn secondary" href="/admin/export.csv?table=hits">Export hits CSV</a>
 </div></section>
 
+<section><h2>Spend (Estimated)</h2>
+<p>Today so far: <b>${usd(today)}</b> of a ${cap > 0 ? `$${cap.toFixed(2)} daily cap` : 'no daily cap'}${cap > 0 && today >= cap ? ' · <b>cap reached, queue parked until tomorrow</b>' : ''}.</p>
+${table(['Engine', 'Today', 'Last 7 days', 'Last 30 days', 'Runs (30d)', 'Search calls', 'Tokens in / out', 'Per run', 'Projected month'], spendRows)}
+<p class="muted">Estimates from the token and search counts each API returns, priced with the rates in the Worker variables. The projection assumes the daily batch (${defs.length} prompts × ${repeats} repeats per engine). Your OpenAI and Google billing pages are the real figures.</p></section>
+
 <section><h2>Test 1: JavaScript Rendering</h2><p class="muted">Share of successful runs (last 30 days) where the answer contained each code.</p>
 ${table(['Engine', 'HTML code', 'JS code', 'Delayed JS code', 'Fetched-data code', 'Errors'], t1Rows)}</section>
 
@@ -195,7 +223,7 @@ ${table(['Time', 'Path', 'Status', 'Bot', 'Verified', 'Network', 'User agent'], 
 </section>
 
 <section><h2>Latest Runs</h2>
-${recentRuns.results.map((r: any) => `<details><summary><b>${esc(r.engine)}</b> · ${esc(r.prompt_id)} · ${esc(r.status === 'ok' ? r.outcome : 'error')} <span class="muted">${esc(r.ts)} · ${r.latency_ms ?? ''} ms · ${esc(r.model ?? '')}</span></summary>
+${recentRuns.results.map((r: any) => `<details><summary><b>${esc(r.engine)}</b> · ${esc(r.prompt_id)} · ${esc(r.status === 'ok' ? r.outcome : 'error')} <span class="muted">${esc(r.ts)} · ${r.latency_ms ?? ''} ms · ${esc(r.model ?? '')}${r.cost_usd != null ? ` · $${Number(r.cost_usd).toFixed(4)}` : ''}</span></summary>
 <pre>${esc(r.status === 'ok' ? r.answer : r.error)}</pre>
 ${r.status === 'ok' ? `<p><b>Queries</b> ${esc(r.queries)}</p><p><b>Fetched</b> ${esc(r.fetched)}</p><p><b>Citations</b> ${esc(r.citations)}</p><p><b>Sources</b> ${esc(r.sources)}</p>${r.error ? `<p><b>Notes</b> ${esc(r.error)}</p>` : ''}` : ''}
 </details>`).join('') || '<p class="muted">No runs yet.</p>'}

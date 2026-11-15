@@ -27,6 +27,10 @@ Every page says it is part of an experiment and that its names and codes are fic
 3. Open `https://llm-crawler-lab.<subdomain>.workers.dev/admin?token=ADMIN_TOKEN` and press **Initialise lab**.
 4. Submit `https://christopher-kelly.co.uk/lab/sitemap.xml` in Search Console and Bing Webmaster Tools, then press **Ping IndexNow**.
 
+## Costs
+
+Every run stores the token and search-call counts the API returns and an estimated cost, priced with the `*_PRICE_*` and `*_SEARCH_PER_1K` Worker variables. The dashboard shows spend today, over 7 and 30 days, per run and projected per month. `MAX_DAILY_USD` (default $1.00) stops runs for the rest of the UTC day once the estimate reaches it; parked jobs show as `capped`. The provider billing pages remain the real figures.
+
 ## Reading results
 
 - Test 1: compare the HTML code rate with the JS code rates per engine. HTML seen but JS missing means no rendering.

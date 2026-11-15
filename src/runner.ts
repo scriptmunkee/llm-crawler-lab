@@ -1,5 +1,5 @@
 import { getCanaries } from './canaries';
-import { callEngine, ENGINES, hasKey, isEnabled, type EngineName } from './engines';
+import { callEngine, ENGINES, estimateCost, hasKey, isEnabled, type EngineName } from './engines';
 import { detect, outcome, prompts } from './tests';
 import type { Env } from './index';
 
@@ -25,8 +25,21 @@ export async function enqueue(env: Env, repeats?: number): Promise<{ batch: stri
   return { batch, queued: stmts.length, skipped };
 }
 
+// Estimated spend so far today (UTC), from stored run costs.
+export async function spendToday(env: Env): Promise<number> {
+  const day = new Date().toISOString().slice(0, 10);
+  const row = await env.DB.prepare('SELECT COALESCE(SUM(cost_usd), 0) s FROM runs WHERE ts >= ?').bind(day).first<{ s: number }>();
+  return row?.s ?? 0;
+}
+
 // Work through pending jobs, a few at a time. Called by the frequent cron.
 export async function processJobs(env: Env, limit?: number): Promise<number> {
+  const cap = parseFloat(env.MAX_DAILY_USD || '0');
+  if (cap > 0 && (await spendToday(env)) >= cap) {
+    // Over today's budget: park the rest of the queue rather than spending more.
+    await env.DB.prepare("UPDATE jobs SET status = 'capped' WHERE status = 'pending'").run();
+    return 0;
+  }
   const max = limit ?? Math.max(1, parseInt(env.BATCH_SIZE || '6', 10));
   const c = await getCanaries(env.DB);
   if (!c) return 0;
@@ -51,13 +64,14 @@ export async function processJobs(env: Env, limit?: number): Promise<number> {
       const urls = [...r.citations, ...r.sources, ...r.fetched];
       const d = detect(p, r.answer, urls, r.fetched);
       await env.DB.prepare(
-        `INSERT INTO runs (ts, batch, test_id, prompt_id, engine, model, status, latency_ms, prompt, answer, queries, fetched, sources, citations, detected, outcome, error)
-         VALUES (?, ?, ?, ?, ?, ?, 'ok', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO runs (ts, batch, test_id, prompt_id, engine, model, status, latency_ms, prompt, answer, queries, fetched, sources, citations, detected, outcome, error, input_tokens, output_tokens, search_calls, cost_usd)
+         VALUES (?, ?, ?, ?, ?, ?, 'ok', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         now(), job.batch, p.test, p.id, job.engine, r.model, Date.now() - started, p.text,
         r.answer.slice(0, 8000), JSON.stringify(r.queries), JSON.stringify(r.fetched),
         JSON.stringify(r.sources.slice(0, 50)), JSON.stringify(r.citations.slice(0, 50)),
         JSON.stringify(d), outcome(p, d), r.note ?? null,
+        r.usage.input, r.usage.output, r.usage.searches, estimateCost(env, job.engine, r.usage),
       ).run();
       await env.DB.prepare("UPDATE jobs SET status = 'done' WHERE id = ?").bind(job.id).run();
     } catch (err: any) {

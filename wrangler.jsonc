@@ -26,6 +26,18 @@
     "OPENAI_MODEL": "gpt-6-luna",
     "GEMINI_MODEL": "gemini-3.8-flash",
     "PERPLEXITY_MODEL": "sonar",
+    // Cost estimate inputs (USD; tokens per 1M, search per 1k calls). OpenAI: gpt-6-luna
+    // list prices, web search $10/1k calls, Nov 2026. Gemini: gemini-3.5-flash prices used
+    // as a stand-in until 3.8 Flash is on Google's price list; grounding is free for the
+    // first 5,000 prompts a month, which covers this lab's volume, so search is set to 0.
+    "OPENAI_PRICE_IN": "0.10",
+    "OPENAI_PRICE_OUT": "0.50",
+    "OPENAI_SEARCH_PER_1K": "10",
+    "GEMINI_PRICE_IN": "1.50",
+    "GEMINI_PRICE_OUT": "9.00",
+    "GEMINI_SEARCH_PER_1K": "0",
+    // Stop running prompts for the rest of the UTC day once estimated spend reaches this.
+    "MAX_DAILY_USD": "1.00",
     "CLAUDE_MODEL": "claude-sonnet-4-6"
   }
   // Secrets (set in the dashboard, never committed): ADMIN_TOKEN, OPENAI_API_KEY, GEMINI_API_KEY

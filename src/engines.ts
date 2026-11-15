@@ -8,6 +8,7 @@ export interface EngineResult {
   sources: string[];    // URLs it was shown (search results)
   citations: string[];  // URLs cited in the answer
   note?: string;
+  usage: { input: number; output: number; searches: number };
 }
 
 export type EngineName = 'openai' | 'gemini' | 'perplexity' | 'claude';
@@ -23,6 +24,20 @@ export interface EngineEnv {
   PERPLEXITY_MODEL: string;
   CLAUDE_MODEL: string;
   ENABLED_ENGINES?: string;   // comma-separated, e.g. "openai,gemini"
+  // Prices for the cost estimate (USD). Token prices per 1M tokens, search per 1k calls.
+  OPENAI_PRICE_IN?: string; OPENAI_PRICE_OUT?: string; OPENAI_SEARCH_PER_1K?: string;
+  GEMINI_PRICE_IN?: string; GEMINI_PRICE_OUT?: string; GEMINI_SEARCH_PER_1K?: string;
+}
+
+export function estimateCost(env: EngineEnv, engine: EngineName, u: EngineResult['usage']): number | null {
+  const n = (v?: string) => (v === undefined || v === '' ? NaN : parseFloat(v));
+  const [pi, po, ps] = engine === 'openai'
+    ? [n(env.OPENAI_PRICE_IN), n(env.OPENAI_PRICE_OUT), n(env.OPENAI_SEARCH_PER_1K)]
+    : engine === 'gemini'
+      ? [n(env.GEMINI_PRICE_IN), n(env.GEMINI_PRICE_OUT), n(env.GEMINI_SEARCH_PER_1K)]
+      : [NaN, NaN, NaN];
+  if ([pi, po, ps].some(Number.isNaN)) return null;
+  return (u.input / 1e6) * pi + (u.output / 1e6) * po + (u.searches / 1000) * ps;
 }
 
 export function isEnabled(env: EngineEnv, e: EngineName): boolean {
@@ -81,7 +96,11 @@ async function openai(env: EngineEnv, prompt: string): Promise<EngineResult> {
       }
     }
   }
-  return { model: j.model ?? model, answer, queries: uniq(queries), fetched: uniq(fetched), sources: uniq(sources), citations: uniq(citations) };
+  const searches = (j.output ?? []).filter((i: any) => i.type === 'web_search_call').length;
+  return {
+    model: j.model ?? model, answer, queries: uniq(queries), fetched: uniq(fetched), sources: uniq(sources), citations: uniq(citations),
+    usage: { input: j.usage?.input_tokens ?? 0, output: j.usage?.output_tokens ?? 0, searches },
+  };
 }
 
 async function gemini(env: EngineEnv, prompt: string): Promise<EngineResult> {
@@ -105,11 +124,17 @@ async function gemini(env: EngineEnv, prompt: string): Promise<EngineResult> {
   }
   // Grounding chunks carry Google redirect URLs; keep the title (usually the domain) alongside.
   const citations = (gm.groundingChunks ?? []).map((c: any) => c.web?.uri ? `${c.web.title ?? ''} ${c.web.uri}`.trim() : '').filter(Boolean);
+  const um2 = j.usageMetadata ?? {};
   return {
     model, answer,
     queries: uniq(gm.webSearchQueries ?? []),
     fetched: uniq(fetched), sources: [], citations: uniq(citations),
     note: statuses.length ? statuses.join('\n') : undefined,
+    usage: {
+      input: (um2.promptTokenCount ?? 0) + (um2.toolUsePromptTokenCount ?? 0),
+      output: (um2.candidatesTokenCount ?? 0) + (um2.thoughtsTokenCount ?? 0),
+      searches: (gm.webSearchQueries ?? []).length,
+    },
   };
 }
 
@@ -120,7 +145,10 @@ async function perplexity(env: EngineEnv, prompt: string): Promise<EngineResult>
   });
   const answer = j.choices?.[0]?.message?.content ?? '';
   const sources = (j.search_results ?? []).map((s: any) => s.url).filter(Boolean);
-  return { model: j.model ?? model, answer, queries: [], fetched: [], sources: uniq(sources), citations: uniq(j.citations ?? []) };
+  return {
+    model: j.model ?? model, answer, queries: [], fetched: [], sources: uniq(sources), citations: uniq(j.citations ?? []),
+    usage: { input: j.usage?.prompt_tokens ?? 0, output: j.usage?.completion_tokens ?? 0, searches: 1 },
+  };
 }
 
 async function claude(env: EngineEnv, prompt: string): Promise<EngineResult> {
@@ -163,5 +191,6 @@ async function claude(env: EngineEnv, prompt: string): Promise<EngineResult> {
     model: j.model ?? model, answer,
     queries: uniq(queries), fetched: uniq(fetched), sources: uniq(sources), citations: uniq(citations),
     note: notes.length ? notes.join('\n') : undefined,
+    usage: { input: j.usage?.input_tokens ?? 0, output: j.usage?.output_tokens ?? 0, searches: j.usage?.server_tool_use?.web_search_requests ?? queries.length },
   };
 }
