@@ -8,7 +8,7 @@
   // Reached publicly through christopher-kelly.co.uk/lab/* via a service binding on the main site.
   // The admin dashboard lives on this Worker's workers.dev URL at /admin.
   "d1_databases": [
-    { "binding": "DB", "database_name": "llm-crawler-lab" }
+    { "binding": "DB", "database_name": "llm-crawler-lab", "database_id": "e481928f-9190-46c1-8da9-b1018201110f" }
   ],
   "triggers": {
     // First: process the job queue every 10 minutes. Second: queue the daily batch (UTC).
