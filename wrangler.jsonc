@@ -23,8 +23,8 @@
     // add "perplexity" or "claude" here (plus the API key secret) to turn them on.
     "ENABLED_ENGINES": "openai,gemini",
     "BATCH_SIZE": "6",
-    "OPENAI_MODEL": "gpt-5-mini",
-    "GEMINI_MODEL": "gemini-2.5-flash",
+    "OPENAI_MODEL": "gpt-6-luna",
+    "GEMINI_MODEL": "gemini-3.8-flash",
     "PERPLEXITY_MODEL": "sonar",
     "CLAUDE_MODEL": "claude-sonnet-4-6"
   }
