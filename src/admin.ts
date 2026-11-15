@@ -1,5 +1,5 @@
 import { getCanaries, initCanaries } from './canaries';
-import { ENGINES, hasKey } from './engines';
+import { ENGINES, hasKey, isEnabled } from './engines';
 import { LAB_URL_PATHS } from './pages';
 import { enqueue, processJobs } from './runner';
 import { prompts } from './tests';
@@ -46,7 +46,7 @@ export async function handleAdmin(req: Request, env: Env): Promise<Response> {
       const form = await req.formData().catch(() => null);
       const repeats = parseInt(String(form?.get('repeats') ?? '1'), 10) || 1;
       const r = await enqueue(env, repeats);
-      return back(`Queued ${r.queued} jobs.${r.skipped.length ? ` Skipped (no key): ${r.skipped.join(', ')}.` : ''}`);
+      return back(`Queued ${r.queued} jobs.${r.skipped.length ? ` Not run (switched off or no key): ${r.skipped.join(', ')}.` : ''}`);
     }
     if (path === '/admin/process' && isPost) {
       const n = await processJobs(env);
@@ -104,15 +104,16 @@ async function dashboard(env: Env, msg: string | null): Promise<string> {
   }
 
   const pending = await env.DB.prepare("SELECT status, COUNT(*) n FROM jobs GROUP BY status").all<{ status: string; n: number }>();
-  const engineRows = ENGINES.map((e) => [e, hasKey(env, e) ? '✅ key set' : '⚠️ no key', esc(modelFor(env, e))]);
+  const engineRows = ENGINES.map((e) => [e, !isEnabled(env, e) ? '⏸ switched off' : hasKey(env, e) ? '✅ key set' : '⚠️ no key', esc(modelFor(env, e))]);
 
   const runs = await env.DB.prepare('SELECT prompt_id, engine, status, outcome, detected FROM runs WHERE ts > ?').bind(since).all<{ prompt_id: string; engine: string; status: string; outcome: string | null; detected: string | null }>();
   const R = runs.results;
+  const ON = ENGINES.filter((e) => isEnabled(env, e));
   const defs = prompts(c, env.SITE_ORIGIN);
 
   // Test 1: per engine, share of OK runs that saw each code
   const t1Labels = ['html', 'js', 'jsDelayed', 'fetched'];
-  const t1Rows = ENGINES.map((e) => {
+  const t1Rows = ON.map((e) => {
     const rs = R.filter((r) => r.prompt_id === 't1-render' && r.engine === e && r.status === 'ok');
     const errs = R.filter((r) => r.prompt_id === 't1-render' && r.engine === e && r.status === 'error').length;
     return [e, ...t1Labels.map((l) => pct(rs.filter((r) => (JSON.parse(r.detected || '{}').found ?? []).includes(l)).length, rs.length)), errs];
@@ -120,7 +121,7 @@ async function dashboard(env: Env, msg: string | null): Promise<string> {
 
   // Test 2: per engine and redirect type, outcome distribution
   const t2Ids = ['t2-301', 't2-302', 't2-js', 't2-meta'];
-  const t2Rows = ENGINES.map((e) => [e, ...t2Ids.map((id) => {
+  const t2Rows = ON.map((e) => [e, ...t2Ids.map((id) => {
     const rs = R.filter((r) => r.prompt_id === id && r.engine === e && r.status === 'ok');
     if (!rs.length) return '<span class="muted">n/a</span>';
     const f = rs.filter((r) => r.outcome === 'followed').length;
@@ -130,7 +131,7 @@ async function dashboard(env: Env, msg: string | null): Promise<string> {
 
   // Test 4: per engine and page arm, found rate
   const t4Ids = ['t4-a', 't4-b', 't4-c'];
-  const t4Rows = ENGINES.map((e) => [e, ...t4Ids.map((id) => {
+  const t4Rows = ON.map((e) => [e, ...t4Ids.map((id) => {
     const rs = R.filter((r) => r.prompt_id === id && r.engine === e && r.status === 'ok');
     return pct(rs.filter((r) => (r.outcome ?? '').startsWith('found')).length, rs.length);
   })]);
@@ -153,7 +154,7 @@ async function dashboard(env: Env, msg: string | null): Promise<string> {
 
   body = `
 <section><h2>Status</h2>
-${table(['Engine', 'API key', 'Model'], engineRows)}
+${table(['Engine', 'Status', 'Model'], engineRows)}
 <p>Jobs: ${pending.results.map((r) => `${esc(r.status)} ${r.n}`).join(' · ') || 'none yet'}. Daily batch: ${esc(env.REPEATS)} repeats per prompt and engine.</p>
 <div class="actions">
 <form method="post" action="/admin/run"><input type="hidden" name="repeats" value="1"><button>Queue one run of every prompt</button></form>

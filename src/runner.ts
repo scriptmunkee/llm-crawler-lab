@@ -1,5 +1,5 @@
 import { getCanaries } from './canaries';
-import { callEngine, ENGINES, hasKey, type EngineName } from './engines';
+import { callEngine, ENGINES, hasKey, isEnabled, type EngineName } from './engines';
 import { detect, outcome, prompts } from './tests';
 import type { Env } from './index';
 
@@ -11,8 +11,8 @@ export async function enqueue(env: Env, repeats?: number): Promise<{ batch: stri
   if (!c) throw new Error('Lab not initialised: run /admin/init first');
   const n = repeats ?? Math.max(1, parseInt(env.REPEATS || '3', 10));
   const batch = now();
-  const engines = ENGINES.filter((e) => hasKey(env, e));
-  const skipped = ENGINES.filter((e) => !hasKey(env, e));
+  const engines = ENGINES.filter((e) => isEnabled(env, e) && hasKey(env, e));
+  const skipped = ENGINES.filter((e) => !engines.includes(e));
   const stmts: D1PreparedStatement[] = [];
   for (const p of prompts(c, env.SITE_ORIGIN)) {
     for (const e of engines) {

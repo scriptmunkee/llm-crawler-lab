@@ -22,6 +22,12 @@ export interface EngineEnv {
   GEMINI_MODEL: string;
   PERPLEXITY_MODEL: string;
   CLAUDE_MODEL: string;
+  ENABLED_ENGINES?: string;   // comma-separated, e.g. "openai,gemini"
+}
+
+export function isEnabled(env: EngineEnv, e: EngineName): boolean {
+  const list = (env.ENABLED_ENGINES ?? ENGINES.join(',')).split(',').map((s) => s.trim());
+  return list.includes(e);
 }
 
 export function hasKey(env: EngineEnv, e: EngineName): boolean {

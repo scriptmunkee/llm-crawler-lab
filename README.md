@@ -18,12 +18,12 @@ Every page says it is part of an experiment and that its names and codes are fic
 - **Main site** `christopher-kelly-site` passes `/lab/*` to this Worker through a service binding (`LAB`), so the pages sit on the real domain.
 - **Canaries** (codes and invented terms) are generated once by `/admin/init` and stored only in D1, never in this repo, so the only place an engine can learn them is the lab pages.
 - **Runner**: a daily cron (06:23 UTC) queues every prompt × engine × `REPEATS`. A cron every 10 minutes works through `BATCH_SIZE` jobs at a time and stores each answer, the search queries, fetched URLs, sources, citations, which codes were found and an outcome label in `runs`.
-- **Engines**: OpenAI Responses API with `web_search`; Gemini with `url_context` and `google_search`; Perplexity Sonar; Claude with `web_search` and `web_fetch`. Models are set in `wrangler.jsonc` vars.
+- **Engines**: OpenAI Responses API with `web_search`; Gemini with `url_context` and `google_search`; Perplexity Sonar; Claude with `web_search` and `web_fetch`. Only the engines in `ENABLED_ENGINES` run (currently `openai,gemini`; Perplexity and Claude are off to keep costs down). Models are set in `wrangler.jsonc` vars.
 
 ## Setup
 
 1. Deploy (Workers Builds from this repo; D1 is provisioned automatically from `wrangler.jsonc`).
-2. Add secrets in the Worker's Settings → Variables and secrets: `ADMIN_TOKEN` (any long random string), `OPENAI_API_KEY`, `GEMINI_API_KEY`, `PERPLEXITY_API_KEY`, `ANTHROPIC_API_KEY`. An engine without a key is skipped. Claude's web search must also be enabled for the organisation in the Anthropic Console.
+2. Add secrets in the Worker's Settings → Variables and secrets: `ADMIN_TOKEN` (any long random string), `OPENAI_API_KEY`, `GEMINI_API_KEY`. To switch Perplexity or Claude on, add it to `ENABLED_ENGINES` and add `PERPLEXITY_API_KEY` or `ANTHROPIC_API_KEY` (Claude's web search must also be enabled for the organisation in the Anthropic Console). An engine without a key is skipped.
 3. Open `https://llm-crawler-lab.<subdomain>.workers.dev/admin?token=ADMIN_TOKEN` and press **Initialise lab**.
 4. Submit `https://christopher-kelly.co.uk/lab/sitemap.xml` in Search Console and Bing Webmaster Tools, then press **Ping IndexNow**.
 
