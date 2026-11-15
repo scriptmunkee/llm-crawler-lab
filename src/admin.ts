@@ -26,7 +26,20 @@ async function ensureSchema(env: Env) {
 export async function handleAdmin(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url);
   if (!env.ADMIN_TOKEN) return new Response('Set the ADMIN_TOKEN secret first.', { status: 503 });
-  if (!authed(req, env)) return new Response('Not authorised. Add ?token=YOUR_ADMIN_TOKEN once.', { status: 401 });
+  // Sign-in form: posting the token sets the cookie, so it never has to go in a URL.
+  if (url.pathname === '/admin/login' && req.method === 'POST') {
+    const form = await req.formData().catch(() => null);
+    const t = String(form?.get('token') ?? '');
+    if (t && t === env.ADMIN_TOKEN) {
+      return new Response(null, { status: 303, headers: { location: '/admin', 'set-cookie': `lab_admin=${t}; Path=/admin; HttpOnly; Secure; SameSite=Strict; Max-Age=31536000` } });
+    }
+    return new Response(page('<p>That token didn\'t match.</p><p><a href="/admin">Try again</a></p>', null), { status: 401, headers: { 'content-type': 'text/html; charset=utf-8' } });
+  }
+  if (!authed(req, env)) {
+    return new Response(page(`<section><h2>Sign In</h2><p>Enter the ADMIN_TOKEN you set on the Worker. You stay signed in on this browser.</p>
+<form method="post" action="/admin/login" class="actions"><input type="password" name="token" placeholder="Admin token" autocomplete="current-password" style="font:inherit;padding:.5rem .7rem;border:1px solid rgba(0,0,0,.2);border-radius:8px;min-width:280px"><button>Sign in</button></form></section>`, null),
+      { status: 401, headers: { 'content-type': 'text/html; charset=utf-8', 'x-robots-tag': 'noindex, nofollow' } });
+  }
 
   const headers: Record<string, string> = { 'x-robots-tag': 'noindex, nofollow', 'cache-control': 'no-store' };
   const q = url.searchParams.get('token');
