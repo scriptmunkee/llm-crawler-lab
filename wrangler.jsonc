@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "llm-crawler-lab",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  // Reached publicly through christopher-kelly.co.uk/lab/* via a service binding on the main site.
+  // The admin dashboard lives on this Worker's workers.dev URL at /admin.
+  "d1_databases": [
+    { "binding": "DB", "database_name": "llm-crawler-lab" }
+  ],
+  "triggers": {
+    // First: process the job queue every 10 minutes. Second: queue the daily batch (UTC).
+    "crons": ["*/10 * * * *", "23 6 * * *"]
+  },
+  "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
+  "vars": {
+    "SITE_ORIGIN": "https://christopher-kelly.co.uk",
+    "DAILY_CRON": "23 6 * * *",
+    "REPEATS": "3",
+    "BATCH_SIZE": "6",
+    "OPENAI_MODEL": "gpt-5-mini",
+    "GEMINI_MODEL": "gemini-2.5-flash",
+    "PERPLEXITY_MODEL": "sonar",
+    "CLAUDE_MODEL": "claude-sonnet-4-6"
+  }
+  // Secrets (set in the dashboard, never committed): OPENAI_API_KEY, GEMINI_API_KEY,
+  // PERPLEXITY_API_KEY, ANTHROPIC_API_KEY, ADMIN_TOKEN
+}

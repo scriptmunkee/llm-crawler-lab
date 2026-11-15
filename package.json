@@ -1,0 +1,21 @@
+{
+  "name": "llm-crawler-lab",
+  "version": "1.0.0",
+  "description": "Controlled tests of how search engines and AI assistants crawl, render, follow redirects and find pages",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc -p ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261115.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.162.0"
+  }
+}
