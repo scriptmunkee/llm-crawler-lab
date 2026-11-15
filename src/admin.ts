@@ -69,7 +69,7 @@ export async function handleAdmin(req: Request, env: Env): Promise<Response> {
       const c = await getCanaries(env.DB);
       if (!c) return back('Initialise the lab first.');
       const host = new URL(env.SITE_ORIGIN).host;
-      const res = await fetch('https://api.indexnow.org/indexnow', {
+      const res = await fetch('https://www.bing.com/indexnow', {
         method: 'POST', headers: { 'content-type': 'application/json; charset=utf-8' },
         body: JSON.stringify({
           host, key: c.indexnowKey,
