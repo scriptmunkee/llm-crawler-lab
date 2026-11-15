@@ -6,12 +6,12 @@ import type { Env } from './index';
 const now = () => new Date().toISOString();
 
 // Queue every prompt x engine x repeat. Engines without an API key are skipped.
-export async function enqueue(env: Env, repeats?: number): Promise<{ batch: string; queued: number; skipped: string[] }> {
+export async function enqueue(env: Env, repeats?: number, only?: EngineName): Promise<{ batch: string; queued: number; skipped: string[] }> {
   const c = await getCanaries(env.DB);
   if (!c) throw new Error('Lab not initialised: run /admin/init first');
   const n = repeats ?? Math.max(1, parseInt(env.REPEATS || '3', 10));
   const batch = now();
-  const engines = ENGINES.filter((e) => isEnabled(env, e) && hasKey(env, e));
+  const engines = ENGINES.filter((e) => isEnabled(env, e) && hasKey(env, e) && (!only || e === only));
   const skipped = ENGINES.filter((e) => !engines.includes(e));
   const stmts: D1PreparedStatement[] = [];
   for (const p of prompts(c, env.SITE_ORIGIN)) {

@@ -58,7 +58,8 @@ export async function handleAdmin(req: Request, env: Env): Promise<Response> {
     if (path === '/admin/run' && isPost) {
       const form = await req.formData().catch(() => null);
       const repeats = parseInt(String(form?.get('repeats') ?? '1'), 10) || 1;
-      const r = await enqueue(env, repeats);
+      const only = String(form?.get('engine') ?? '') as any;
+      const r = await enqueue(env, repeats, (ENGINES as string[]).includes(only) ? only : undefined);
       return back(`Queued ${r.queued} jobs.${r.skipped.length ? ` Not run (switched off or no key): ${r.skipped.join(', ')}.` : ''}`);
     }
     if (path === '/admin/process' && isPost) {
@@ -194,6 +195,7 @@ ${table(['Engine', 'Status', 'Model'], engineRows)}
 <p>Jobs: ${pending.results.map((r) => `${esc(r.status)} ${r.n}`).join(' · ') || 'none yet'}. Daily batch: ${esc(env.REPEATS)} repeats per prompt and engine.</p>
 <div class="actions">
 <form method="post" action="/admin/run"><input type="hidden" name="repeats" value="1"><button>Queue one run of every prompt</button></form>
+${ENGINES.filter((e) => isEnabled(env, e)).map((e) => `<form method="post" action="/admin/run"><input type="hidden" name="repeats" value="1"><input type="hidden" name="engine" value="${e}"><button class="secondary">Run ${e} only</button></form>`).join('')}
 <form method="post" action="/admin/process"><button class="secondary">Process queue now</button></form>
 <form method="post" action="/admin/indexnow"><button class="secondary">Ping IndexNow</button></form>
 <a class="btn secondary" href="/admin/export.csv?table=runs">Export runs CSV</a>
