@@ -1,5 +1,6 @@
 import { getCanaries, initCanaries } from './canaries';
 import { ENGINES, hasKey, isEnabled } from './engines';
+import { classify } from './bots';
 import { LAB_URL_PATHS } from './pages';
 import { enqueue, processJobs, spendToday } from './runner';
 import { prompts } from './tests';
@@ -52,8 +53,15 @@ export async function handleAdmin(req: Request, env: Env): Promise<Response> {
   try {
     if (path === '/admin/init' && isPost) {
       await ensureSchema(env);
+      // Re-label stored hits with the current bot rules (safe to repeat).
+      const uas = await env.DB.prepare('SELECT DISTINCT ua FROM hits').all<{ ua: string | null }>();
+      const upd = uas.results.map((u) => {
+        const c = classify(u.ua);
+        return env.DB.prepare('UPDATE hits SET bot = ?, bot_group = ? WHERE ua IS ?').bind(c.bot, c.group, u.ua);
+      });
+      if (upd.length) await env.DB.batch(upd);
       const r = await initCanaries(env.DB);
-      return back(r.created ? 'Lab initialised: schema ready and canaries created.' : 'Schema checked. Canaries already existed, left unchanged.');
+      return back(r.created ? 'Lab initialised: schema ready and canaries created.' : `Schema checked and ${upd.length} user agents re-labelled. Canaries unchanged.`);
     }
     if (path === '/admin/run' && isPost) {
       const form = await req.formData().catch(() => null);
@@ -198,6 +206,7 @@ ${table(['Engine', 'Status', 'Model'], engineRows)}
 ${ENGINES.filter((e) => isEnabled(env, e)).map((e) => `<form method="post" action="/admin/run"><input type="hidden" name="repeats" value="1"><input type="hidden" name="engine" value="${e}"><button class="secondary">Run ${e} only</button></form>`).join('')}
 <form method="post" action="/admin/process"><button class="secondary">Process queue now</button></form>
 <form method="post" action="/admin/indexnow"><button class="secondary">Ping IndexNow</button></form>
+<form method="post" action="/admin/init"><button class="secondary">Re-label bot hits</button></form>
 <a class="btn secondary" href="/admin/export.csv?table=runs">Export runs CSV</a>
 <a class="btn secondary" href="/admin/export.csv?table=hits">Export hits CSV</a>
 </div></section>

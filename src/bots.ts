@@ -12,6 +12,8 @@ const RULES: Array<[RegExp, string, string]> = [
   [/anthropic-ai/i, 'anthropic-ai', 'ai-training'],
   [/Perplexity-User/i, 'Perplexity-User', 'ai-user'],
   [/PerplexityBot/i, 'PerplexityBot', 'ai-search'],
+  [/GoogleAgent-URLContext/i, 'GoogleAgent-URLContext (Gemini)', 'ai-user'],
+  [/GoogleAgent/i, 'GoogleAgent (other)', 'ai-user'],
   [/Google-Extended/i, 'Google-Extended', 'ai-training'],
   [/Google-CloudVertexBot/i, 'Google-CloudVertexBot', 'ai-user'],
   [/GoogleOther/i, 'GoogleOther', 'other-bot'],
