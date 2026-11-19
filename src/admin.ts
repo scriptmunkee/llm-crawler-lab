@@ -60,6 +60,7 @@ export async function handleAdmin(req: Request, env: Env): Promise<Response> {
         return env.DB.prepare('UPDATE hits SET bot = ?, bot_group = ? WHERE ua IS ?').bind(c.bot, c.group, u.ua);
       });
       if (upd.length) await env.DB.batch(upd);
+      await env.DB.prepare("UPDATE runs SET outcome = 'blank answer' WHERE status = 'ok' AND (answer IS NULL OR trim(answer) = '')").run();
       const r = await initCanaries(env.DB);
       return back(r.created ? 'Lab initialised: schema ready and canaries created.' : `Schema checked and ${upd.length} user agents re-labelled. Canaries unchanged.`);
     }
@@ -148,10 +149,15 @@ async function dashboard(env: Env, msg: string | null): Promise<string> {
   ).bind(day, d7, since).all<any>();
   const usd = (v: number | null | undefined) => (v == null ? '<span class="muted">n/a</span>' : `$${Number(v).toFixed(v < 1 ? 4 : 2)}`);
   const repeats = Math.max(1, parseInt(env.REPEATS || '3', 10));
+  const tl = (s?: string) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+  const dailySet = tl(env.DAILY_TESTS || 't1,t2,t4');
+  const weeklySet = tl(env.WEEKLY_TESTS).filter((t) => !dailySet.includes(t));
+  const dailyPrompts = defs.filter((p) => dailySet.includes(p.test)).length;
+  const weeklyPrompts = defs.filter((p) => weeklySet.includes(p.test)).length;
   const spendRows = spend.results.map((s: any) => [
     esc(s.engine), usd(s.today), usd(s.week), usd(s.month), s.runs, s.searches,
     `${Math.round(s.tin / 1000)}k / ${Math.round(s.tout / 1000)}k`, usd(s.per_run),
-    s.per_run == null ? '<span class="muted">n/a</span>' : usd(s.per_run * defs.length * repeats * 30),
+    s.per_run == null ? '<span class="muted">n/a</span>' : usd(s.per_run * repeats * (dailyPrompts * 30 + weeklyPrompts * 4.3)),
   ]);
   const today = await spendToday(env);
   const cap = parseFloat(env.MAX_DAILY_USD || '0');
@@ -159,25 +165,27 @@ async function dashboard(env: Env, msg: string | null): Promise<string> {
   // Test 1: per engine, share of OK runs that saw each code
   const t1Labels = ['html', 'js', 'jsDelayed', 'fetched'];
   const t1Rows = ON.map((e) => {
-    const rs = R.filter((r) => r.prompt_id === 't1-render' && r.engine === e && r.status === 'ok');
-    const errs = R.filter((r) => r.prompt_id === 't1-render' && r.engine === e && r.status === 'error').length;
+    const rs = R.filter((r) => r.prompt_id === 't1-render' && r.engine === e && r.status === 'ok' && r.outcome !== 'blank answer');
+    const errs = R.filter((r) => r.prompt_id === 't1-render' && r.engine === e && (r.status === 'error' || r.outcome === 'blank answer')).length;
     return [e, ...t1Labels.map((l) => pct(rs.filter((r) => (JSON.parse(r.detected || '{}').found ?? []).includes(l)).length, rs.length)), errs];
   });
 
   // Test 2: per engine and redirect type, outcome distribution
   const t2Ids = ['t2-301', 't2-302', 't2-js', 't2-meta'];
   const t2Rows = ON.map((e) => [e, ...t2Ids.map((id) => {
-    const rs = R.filter((r) => r.prompt_id === id && r.engine === e && r.status === 'ok');
+    const all = R.filter((r) => r.prompt_id === id && r.engine === e && r.status === 'ok');
+    const blank = all.filter((r) => r.outcome === 'blank answer').length;
+    const rs = all.filter((r) => r.outcome !== 'blank answer');
     if (!rs.length) return '<span class="muted">n/a</span>';
     const f = rs.filter((r) => r.outcome === 'followed').length;
     const s = rs.filter((r) => r.outcome === 'read source only').length;
-    return `followed ${pct(f, rs.length)}<br>source only ${s}<br>no code ${rs.length - f - s}`;
+    return `followed ${pct(f, rs.length)}<br>source only ${s}<br>no code ${rs.length - f - s}${blank ? `<br><span class="muted">blank ${blank}</span>` : ''}`;
   })]);
 
   // Test 4: per engine and page arm, found rate
   const t4Ids = ['t4-a', 't4-b', 't4-c'];
   const t4Rows = ON.map((e) => [e, ...t4Ids.map((id) => {
-    const rs = R.filter((r) => r.prompt_id === id && r.engine === e && r.status === 'ok');
+    const rs = R.filter((r) => r.prompt_id === id && r.engine === e && r.status === 'ok' && r.outcome !== 'blank answer');
     return pct(rs.filter((r) => (r.outcome ?? '').startsWith('found')).length, rs.length);
   })]);
 
@@ -200,7 +208,7 @@ async function dashboard(env: Env, msg: string | null): Promise<string> {
   body = `
 <section><h2>Status</h2>
 ${table(['Engine', 'Status', 'Model'], engineRows)}
-<p>Jobs: ${pending.results.map((r) => `${esc(r.status)} ${r.n}`).join(' · ') || 'none yet'}. Daily batch: ${esc(env.REPEATS)} repeats per prompt and engine.</p>
+<p>Jobs: ${pending.results.map((r) => `${esc(r.status)} ${r.n}`).join(' · ') || 'none yet'}. Schedule (06:23 UTC): ${esc(env.DAILY_TESTS || 't1,t2,t4')} daily${env.WEEKLY_TESTS ? `, plus ${esc(env.WEEKLY_TESTS)} on ${['Sundays','Mondays','Tuesdays','Wednesdays','Thursdays','Fridays','Saturdays'][parseInt(env.WEEKLY_DAY || '1', 10)]}` : ''}; ${esc(env.REPEATS)} repeats per prompt and engine.</p>
 <div class="actions">
 <form method="post" action="/admin/run"><input type="hidden" name="repeats" value="1"><button>Queue one run of every prompt</button></form>
 ${ENGINES.filter((e) => isEnabled(env, e)).map((e) => `<form method="post" action="/admin/run"><input type="hidden" name="repeats" value="1"><input type="hidden" name="engine" value="${e}"><button class="secondary">Run ${e} only</button></form>`).join('')}
@@ -214,10 +222,10 @@ ${ENGINES.filter((e) => isEnabled(env, e)).map((e) => `<form method="post" actio
 <section><h2>Spend (Estimated)</h2>
 <p>Today so far: <b>${usd(today)}</b> of a ${cap > 0 ? `$${cap.toFixed(2)} daily cap` : 'no daily cap'}${cap > 0 && today >= cap ? ' · <b>cap reached, queue parked until tomorrow</b>' : ''}.</p>
 ${table(['Engine', 'Today', 'Last 7 days', 'Last 30 days', 'Runs (30d)', 'Search calls', 'Tokens in / out', 'Per run', 'Projected month'], spendRows)}
-<p class="muted">Estimates from the token and search counts each API returns, priced with the rates in the Worker variables. The projection assumes the daily batch (${defs.length} prompts × ${repeats} repeats per engine). Your OpenAI and Google billing pages are the real figures.</p></section>
+<p class="muted">Estimates from the token and search counts each API returns, priced with the rates in the Worker variables. The projection uses the current schedule (${dailyPrompts} prompts daily, ${weeklyPrompts} weekly, × ${repeats} repeats per engine). Your OpenAI and Google billing pages are the real figures.</p></section>
 
 <section><h2>Test 1: JavaScript Rendering</h2><p class="muted">Share of successful runs (last 30 days) where the answer contained each code.</p>
-${table(['Engine', 'HTML code', 'JS code', 'Delayed JS code', 'Fetched-data code', 'Errors'], t1Rows)}</section>
+${table(['Engine', 'HTML code', 'JS code', 'Delayed JS code', 'Fetched-data code', 'Errors / blank'], t1Rows)}</section>
 
 <section><h2>Test 2: Redirect Following</h2><p class="muted">"Followed" means the answer gave the destination page's code.</p>
 ${table(['Engine', '301', '302', 'JavaScript', 'Meta refresh'], t2Rows)}</section>

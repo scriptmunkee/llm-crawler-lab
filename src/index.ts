@@ -13,6 +13,9 @@ export interface Env extends EngineEnv {
   DAILY_CRON: string;
   ADMIN_TOKEN?: string;
   MAX_DAILY_USD?: string;
+  DAILY_TESTS?: string;   // tests queued every day, e.g. "t4"
+  WEEKLY_TESTS?: string;  // tests queued once a week, e.g. "t1,t2"
+  WEEKLY_DAY?: string;    // UTC day for weekly tests, 0 = Sunday, 1 = Monday
 }
 
 const HTML = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' };
@@ -95,7 +98,10 @@ export default {
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     if (event.cron === env.DAILY_CRON) {
-      ctx.waitUntil(enqueue(env).then(() => processJobs(env)).catch(() => {}));
+      const list = (s?: string) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+      const tests = list(env.DAILY_TESTS || 't1,t2,t4');
+      if (new Date(event.scheduledTime).getUTCDay() === parseInt(env.WEEKLY_DAY || '1', 10)) tests.push(...list(env.WEEKLY_TESTS));
+      ctx.waitUntil(enqueue(env, undefined, undefined, [...new Set(tests)]).then(() => processJobs(env)).catch(() => {}));
     } else {
       ctx.waitUntil(processJobs(env).catch(() => {}));
     }

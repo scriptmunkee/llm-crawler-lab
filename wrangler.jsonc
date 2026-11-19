@@ -19,6 +19,11 @@
     "SITE_ORIGIN": "https://christopher-kelly.co.uk",
     "DAILY_CRON": "23 6 * * *",
     "REPEATS": "3",
+    // Schedule: test 4 (index dependency) runs daily; tests 1 and 2 (rendering and
+    // redirects) gave the same answer in every run, so they run weekly on Mondays.
+    "DAILY_TESTS": "t4",
+    "WEEKLY_TESTS": "t1,t2",
+    "WEEKLY_DAY": "1",
     // Engines to run. Claude and Perplexity are switched off to keep costs down;
     // add "perplexity" or "claude" here (plus the API key secret) to turn them on.
     "ENABLED_ENGINES": "openai,gemini",

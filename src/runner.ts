@@ -6,7 +6,7 @@ import type { Env } from './index';
 const now = () => new Date().toISOString();
 
 // Queue every prompt x engine x repeat. Engines without an API key are skipped.
-export async function enqueue(env: Env, repeats?: number, only?: EngineName): Promise<{ batch: string; queued: number; skipped: string[] }> {
+export async function enqueue(env: Env, repeats?: number, only?: EngineName, tests?: string[]): Promise<{ batch: string; queued: number; skipped: string[] }> {
   const c = await getCanaries(env.DB);
   if (!c) throw new Error('Lab not initialised: run /admin/init first');
   const n = repeats ?? Math.max(1, parseInt(env.REPEATS || '3', 10));
@@ -14,7 +14,7 @@ export async function enqueue(env: Env, repeats?: number, only?: EngineName): Pr
   const engines = ENGINES.filter((e) => isEnabled(env, e) && hasKey(env, e) && (!only || e === only));
   const skipped = ENGINES.filter((e) => !engines.includes(e));
   const stmts: D1PreparedStatement[] = [];
-  for (const p of prompts(c, env.SITE_ORIGIN)) {
+  for (const p of prompts(c, env.SITE_ORIGIN).filter((x) => !tests || tests.includes(x.test))) {
     for (const e of engines) {
       for (let i = 0; i < n; i++) {
         stmts.push(env.DB.prepare('INSERT INTO jobs (created, batch, prompt_id, engine) VALUES (?, ?, ?, ?)').bind(batch, batch, p.id, e));
@@ -63,6 +63,7 @@ export async function processJobs(env: Env, limit?: number): Promise<number> {
       const r = await callEngine(env, job.engine, p.text);
       const urls = [...r.citations, ...r.sources, ...r.fetched];
       const d = detect(p, r.answer, urls, r.fetched);
+      const label = r.answer.trim() ? outcome(p, d) : 'blank answer';
       await env.DB.prepare(
         `INSERT INTO runs (ts, batch, test_id, prompt_id, engine, model, status, latency_ms, prompt, answer, queries, fetched, sources, citations, detected, outcome, error, input_tokens, output_tokens, search_calls, cost_usd)
          VALUES (?, ?, ?, ?, ?, ?, 'ok', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -70,7 +71,7 @@ export async function processJobs(env: Env, limit?: number): Promise<number> {
         now(), job.batch, p.test, p.id, job.engine, r.model, Date.now() - started, p.text,
         r.answer.slice(0, 8000), JSON.stringify(r.queries), JSON.stringify(r.fetched),
         JSON.stringify(r.sources.slice(0, 50)), JSON.stringify(r.citations.slice(0, 50)),
-        JSON.stringify(d), outcome(p, d), r.note ?? null,
+        JSON.stringify(d), label, r.note ?? null,
         r.usage.input, r.usage.output, r.usage.searches, estimateCost(env, job.engine, r.usage),
       ).run();
       await env.DB.prepare("UPDATE jobs SET status = 'done' WHERE id = ?").bind(job.id).run();
