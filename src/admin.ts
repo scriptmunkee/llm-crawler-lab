@@ -61,6 +61,7 @@ export async function handleAdmin(req: Request, env: Env): Promise<Response> {
       });
       if (upd.length) await env.DB.batch(upd);
       await env.DB.prepare("UPDATE runs SET outcome = 'blank answer' WHERE status = 'ok' AND (answer IS NULL OR trim(answer) = '')").run();
+      await env.DB.prepare("UPDATE runs SET outcome = 'fetch failed' WHERE status = 'ok' AND error LIKE '%URL_RETRIEVAL_STATUS_ERROR%' AND error NOT LIKE '%URL_RETRIEVAL_STATUS_SUCCESS%' AND detected LIKE '%\"found\":[]%'").run();
       const r = await initCanaries(env.DB);
       return back(r.created ? 'Lab initialised: schema ready and canaries created.' : `Schema checked and ${upd.length} user agents re-labelled. Canaries unchanged.`);
     }
@@ -110,6 +111,8 @@ function table(head: string[], rows: (string | number)[][]): string {
   if (!rows.length) return '<p class="muted">No data yet.</p>';
   return `<table><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${typeof c === 'number' ? c : c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 }
+
+const EXCLUDED = ['blank answer', 'fetch failed'];
 
 function pct(n: number, d: number): string {
   return d ? `${Math.round((n / d) * 100)}% <span class="muted">(${n}/${d})</span>` : '<span class="muted">n/a</span>';
@@ -165,8 +168,8 @@ async function dashboard(env: Env, msg: string | null): Promise<string> {
   // Test 1: per engine, share of OK runs that saw each code
   const t1Labels = ['html', 'js', 'jsDelayed', 'fetched'];
   const t1Rows = ON.map((e) => {
-    const rs = R.filter((r) => r.prompt_id === 't1-render' && r.engine === e && r.status === 'ok' && r.outcome !== 'blank answer');
-    const errs = R.filter((r) => r.prompt_id === 't1-render' && r.engine === e && (r.status === 'error' || r.outcome === 'blank answer')).length;
+    const rs = R.filter((r) => r.prompt_id === 't1-render' && r.engine === e && r.status === 'ok' && !EXCLUDED.includes(r.outcome ?? ''));
+    const errs = R.filter((r) => r.prompt_id === 't1-render' && r.engine === e && (r.status === 'error' || EXCLUDED.includes(r.outcome ?? ''))).length;
     return [e, ...t1Labels.map((l) => pct(rs.filter((r) => (JSON.parse(r.detected || '{}').found ?? []).includes(l)).length, rs.length)), errs];
   });
 
@@ -174,18 +177,18 @@ async function dashboard(env: Env, msg: string | null): Promise<string> {
   const t2Ids = ['t2-301', 't2-302', 't2-js', 't2-meta'];
   const t2Rows = ON.map((e) => [e, ...t2Ids.map((id) => {
     const all = R.filter((r) => r.prompt_id === id && r.engine === e && r.status === 'ok');
-    const blank = all.filter((r) => r.outcome === 'blank answer').length;
-    const rs = all.filter((r) => r.outcome !== 'blank answer');
+    const blank = all.filter((r) => EXCLUDED.includes(r.outcome ?? '')).length;
+    const rs = all.filter((r) => !EXCLUDED.includes(r.outcome ?? ''));
     if (!rs.length) return '<span class="muted">n/a</span>';
     const f = rs.filter((r) => r.outcome === 'followed').length;
     const s = rs.filter((r) => r.outcome === 'read source only').length;
-    return `followed ${pct(f, rs.length)}<br>source only ${s}<br>no code ${rs.length - f - s}${blank ? `<br><span class="muted">blank ${blank}</span>` : ''}`;
+    return `followed ${pct(f, rs.length)}<br>source only ${s}<br>no code ${rs.length - f - s}${blank ? `<br><span class="muted">fetch failed / blank ${blank}</span>` : ''}`;
   })]);
 
   // Test 4: per engine and page arm, found rate
   const t4Ids = ['t4-a', 't4-b', 't4-c'];
   const t4Rows = ON.map((e) => [e, ...t4Ids.map((id) => {
-    const rs = R.filter((r) => r.prompt_id === id && r.engine === e && r.status === 'ok' && r.outcome !== 'blank answer');
+    const rs = R.filter((r) => r.prompt_id === id && r.engine === e && r.status === 'ok' && !EXCLUDED.includes(r.outcome ?? ''));
     return pct(rs.filter((r) => (r.outcome ?? '').startsWith('found')).length, rs.length);
   })]);
 
@@ -225,7 +228,7 @@ ${table(['Engine', 'Today', 'Last 7 days', 'Last 30 days', 'Runs (30d)', 'Search
 <p class="muted">Estimates from the token and search counts each API returns, priced with the rates in the Worker variables. The projection uses the current schedule (${dailyPrompts} prompts daily, ${weeklyPrompts} weekly, × ${repeats} repeats per engine). Your OpenAI and Google billing pages are the real figures.</p></section>
 
 <section><h2>Test 1: JavaScript Rendering</h2><p class="muted">Share of successful runs (last 30 days) where the answer contained each code.</p>
-${table(['Engine', 'HTML code', 'JS code', 'Delayed JS code', 'Fetched-data code', 'Errors / blank'], t1Rows)}</section>
+${table(['Engine', 'HTML code', 'JS code', 'Delayed JS code', 'Fetched-data code', 'Errors / failed fetch'], t1Rows)}</section>
 
 <section><h2>Test 2: Redirect Following</h2><p class="muted">"Followed" means the answer gave the destination page's code.</p>
 ${table(['Engine', '301', '302', 'JavaScript', 'Meta refresh'], t2Rows)}</section>

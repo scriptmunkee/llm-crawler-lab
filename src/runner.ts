@@ -63,7 +63,10 @@ export async function processJobs(env: Env, limit?: number): Promise<number> {
       const r = await callEngine(env, job.engine, p.text);
       const urls = [...r.citations, ...r.sources, ...r.fetched];
       const d = detect(p, r.answer, urls, r.fetched);
-      const label = r.answer.trim() ? outcome(p, d) : 'blank answer';
+      // Gemini's URL fetcher sometimes fails on its side (URL_RETRIEVAL_STATUS_ERROR) even though
+      // the lab served the page; those runs are labelled and left out of the rates.
+      const fetchFailed = !d.found.length && /URL_RETRIEVAL_STATUS_ERROR/.test(r.note ?? '') && !/URL_RETRIEVAL_STATUS_SUCCESS/.test(r.note ?? '');
+      const label = !r.answer.trim() ? 'blank answer' : fetchFailed ? 'fetch failed' : outcome(p, d);
       await env.DB.prepare(
         `INSERT INTO runs (ts, batch, test_id, prompt_id, engine, model, status, latency_ms, prompt, answer, queries, fetched, sources, citations, detected, outcome, error, input_tokens, output_tokens, search_calls, cost_usd)
          VALUES (?, ?, ?, ?, ?, ?, 'ok', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
