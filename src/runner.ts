@@ -98,3 +98,12 @@ export async function processJobs(env: Env, limit?: number): Promise<number> {
 
   return results.length;
 }
+
+// Test 4 only means something once a search engine has crawled its pages.
+export async function t4Ready(env: Env): Promise<boolean> {
+  if ((env.T4_GATE ?? 'crawl') !== 'crawl') return true;
+  const row = await env.DB.prepare(
+    "SELECT MIN(ts) first FROM hits WHERE path LIKE '/lab/t4/%' AND bot IN ('Googlebot', 'Bingbot') AND status = 200",
+  ).first<{ first: string | null }>();
+  return !!row?.first;
+}

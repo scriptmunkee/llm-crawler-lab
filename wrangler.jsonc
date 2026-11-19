@@ -24,6 +24,8 @@
     "DAILY_TESTS": "t4",
     "WEEKLY_TESTS": "t1,t2",
     "WEEKLY_DAY": "1",
+    // Hold test 4 until Googlebot or Bingbot has fetched a /lab/t4/ page ("off" to always run).
+    "T4_GATE": "crawl",
     // Engines to run. Claude and Perplexity are switched off to keep costs down;
     // add "perplexity" or "claude" here (plus the API key secret) to turn them on.
     "ENABLED_ENGINES": "openai,gemini",

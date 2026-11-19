@@ -2,7 +2,7 @@ import { getCanaries, initCanaries } from './canaries';
 import { ENGINES, hasKey, isEnabled } from './engines';
 import { classify } from './bots';
 import { LAB_URL_PATHS } from './pages';
-import { enqueue, processJobs, spendToday } from './runner';
+import { enqueue, processJobs, spendToday, t4Ready } from './runner';
 import { prompts } from './tests';
 import type { Env } from './index';
 import SCHEMA from '../schema.sql';
@@ -129,6 +129,10 @@ async function dashboard(env: Env, msg: string | null): Promise<string> {
     return page(body, msg);
   }
 
+  const t4Crawls = await env.DB.prepare(
+    "SELECT path, bot, MIN(ts) first, MAX(ts) last, COUNT(*) n FROM hits WHERE path LIKE '/lab/t4/%' AND bot IN ('Googlebot', 'Bingbot') GROUP BY path, bot ORDER BY path, bot",
+  ).all<{ path: string; bot: string; first: string; last: string; n: number }>();
+  const ready = await t4Ready(env);
   const pending = await env.DB.prepare("SELECT status, COUNT(*) n FROM jobs GROUP BY status").all<{ status: string; n: number }>();
   const engineRows = ENGINES.map((e) => [e, !isEnabled(env, e) ? '⏸ switched off' : hasKey(env, e) ? '✅ key set' : '⚠️ no key', esc(modelFor(env, e))]);
 
@@ -233,7 +237,10 @@ ${table(['Engine', 'HTML code', 'JS code', 'Delayed JS code', 'Fetched-data code
 <section><h2>Test 2: Redirect Following</h2><p class="muted">"Followed" means the answer gave the destination page's code.</p>
 ${table(['Engine', '301', '302', 'JavaScript', 'Meta refresh'], t2Rows)}</section>
 
-<section><h2>Test 4: Index Dependency</h2><p class="muted">Share of runs where the engine found the page with no URL given.</p>
+<section><h2>Test 4: Index Dependency</h2>
+<p>${ready ? '<b>Running daily</b>: a search engine has crawled the test 4 pages.' : '<b>Waiting for a search engine crawl</b>: test 4 is held until Googlebot or Bingbot fetches one of its pages, so no money is spent on answers that can only be "not found".'}</p>
+${table(['Page', 'Crawler', 'First crawl', 'Last crawl', 'Fetches'], t4Crawls.results.map((h) => [esc(h.path), esc(h.bot), esc(h.first), esc(h.last), h.n]))}
+<p class="muted">Share of runs where the engine found the page with no URL given.</p>
 ${table(['Engine', 'A: Bing noindex', 'B: Google noindex', 'C: control'], t4Rows)}</section>
 
 <section><h2>Bot Hits (Last 30 Days)</h2>

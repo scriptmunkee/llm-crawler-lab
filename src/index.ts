@@ -3,7 +3,7 @@ import { classify } from './bots';
 import { getCanaries, type Canaries } from './canaries';
 import type { EngineEnv } from './engines';
 import { indexPage, sitemap, t1Page, t1Script, t2Destination, t2JsSource, t2MetaSource, t4Page } from './pages';
-import { enqueue, processJobs } from './runner';
+import { enqueue, processJobs, t4Ready } from './runner';
 
 export interface Env extends EngineEnv {
   DB: D1Database;
@@ -16,6 +16,7 @@ export interface Env extends EngineEnv {
   DAILY_TESTS?: string;   // tests queued every day, e.g. "t4"
   WEEKLY_TESTS?: string;  // tests queued once a week, e.g. "t1,t2"
   WEEKLY_DAY?: string;    // UTC day for weekly tests, 0 = Sunday, 1 = Monday
+  T4_GATE?: string;       // "crawl": hold test 4 until Googlebot or Bingbot has fetched a test 4 page
 }
 
 const HTML = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' };
@@ -101,7 +102,10 @@ export default {
       const list = (s?: string) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
       const tests = list(env.DAILY_TESTS || 't1,t2,t4');
       if (new Date(event.scheduledTime).getUTCDay() === parseInt(env.WEEKLY_DAY || '1', 10)) tests.push(...list(env.WEEKLY_TESTS));
-      ctx.waitUntil(enqueue(env, undefined, undefined, [...new Set(tests)]).then(() => processJobs(env)).catch(() => {}));
+      ctx.waitUntil(t4Ready(env).then((ready) => {
+        const run = [...new Set(tests)].filter((t) => t !== 't4' || ready);
+        return run.length ? enqueue(env, undefined, undefined, run) : null;
+      }).then(() => processJobs(env)).catch(() => {}));
     } else {
       ctx.waitUntil(processJobs(env).catch(() => {}));
     }
