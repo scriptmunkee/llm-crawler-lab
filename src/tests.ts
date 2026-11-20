@@ -1,7 +1,7 @@
 import type { Canaries } from './canaries';
 import { norm } from './canaries';
 
-export type TestId = 't1' | 't2' | 't4';
+export type TestId = 't1' | 't2' | 't4' | 't5' | 't5seed';
 
 export interface PromptDef {
   id: string;
@@ -10,6 +10,7 @@ export interface PromptDef {
   text: string;
   url?: string;                       // URL given in the prompt, if any
   expect: Record<string, string>;     // label -> canary code to look for
+  engines?: string[];                 // only these engines (default: all enabled)
 }
 
 export function prompts(c: Canaries, origin: string): PromptDef[] {
@@ -51,6 +52,26 @@ export function prompts(c: Canaries, origin: string): PromptDef[] {
       expect: { code: p.code, term: p.term },
     });
   }
+  for (const p of c.t5 ?? []) {
+    if (p.seedEngine) {
+      list.push({
+        id: `t5seed-${p.slug}`,
+        test: 't5seed',
+        label: `Seed fetch: ${p.seedEngine} opens page ${p.slug.toUpperCase()} once`,
+        url: `${origin}${p.path}`,
+        text: `Open ${origin}${p.path} and tell me the reference code shown on that page. The code starts with "LAB-". If you cannot open the page, say so plainly.`,
+        expect: { code: p.code },
+        engines: [p.seedEngine],
+      });
+    }
+    list.push({
+      id: `t5-${p.slug}`,
+      test: 't5',
+      label: `Fetch to index: page ${p.slug.toUpperCase()} (${p.seedEngine ? `seeded by ${p.seedEngine}` : 'never seeded, control'})`,
+      text: `What is the ${p.term} ${p.thing}? Who publishes it, and what reference code does it use?`,
+      expect: { code: p.code, term: p.term },
+    });
+  }
   return list;
 }
 
@@ -79,7 +100,8 @@ export function outcome(p: PromptDef, d: Detection): string {
     if (d.found.includes('source')) return 'read source only';
     return 'no code';
   }
-  // t4
+  if (p.test === 't5seed') return d.found.includes('code') ? 'seeded' : 'seed failed';
+  // t4, t5
   if (d.found.includes('code')) return 'found (code)';
   if (d.citedLab) return 'found (cited)';
   return 'not found';

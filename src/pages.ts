@@ -140,6 +140,19 @@ export function t4Page(origin: string, c: Canaries, slug: string): string | null
   });
 }
 
+export function t5Page(origin: string, c: Canaries, path: string): string | null {
+  const p = c.t5?.find((x) => x.path === path);
+  if (!p) return null;
+  return layout({
+    origin, path: p.path,
+    title: `The ${p.term} ${titleCase(p.thing)} | Crawler and AI Search Lab`,
+    description: `What the ${p.term} ${p.thing} is, who publishes it and the reference code it uses. A fictional test topic.`,
+    body: `<h1>The ${p.term} ${titleCase(p.thing)}</h1>
+<p>The ${p.term} ${p.thing} is a fictional measure invented for this experiment. It is published by the ${p.publisher}, another invented name, and it uses the reference code <span class="code">${p.code}</span>.</p>
+<p>On the ${p.term} ${p.thing}, a typical reading is ${p.figure}. None of this describes a real score, group or measurement.</p>`,
+  });
+}
+
 function titleCase(s: string): string {
   return s.replace(/\b\w/g, (m) => m.toUpperCase());
 }

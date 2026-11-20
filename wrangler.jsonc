@@ -21,11 +21,13 @@
     "REPEATS": "3",
     // Schedule: test 4 (index dependency) runs daily; tests 1 and 2 (rendering and
     // redirects) gave the same answer in every run, so they run weekly on Mondays.
-    "DAILY_TESTS": "t4",
+    "DAILY_TESTS": "t4,t5",
     "WEEKLY_TESTS": "t1,t2",
     "WEEKLY_DAY": "1",
     // Hold test 4 until Googlebot or Bingbot has fetched a /lab/t4/ page ("off" to always run).
     "T4_GATE": "crawl",
+    // Test 5 (does one AI fetch get a page indexed?): one repeat a day per question.
+    "T5_REPEATS": "1",
     // Engines to run. Claude and Perplexity are switched off to keep costs down;
     // add "perplexity" or "claude" here (plus the API key secret) to turn them on.
     "ENABLED_ENGINES": "openai,gemini",
@@ -44,7 +46,7 @@
     "GEMINI_PRICE_OUT": "9.00",
     "GEMINI_SEARCH_PER_1K": "0",
     // Stop running prompts for the rest of the UTC day once estimated spend reaches this.
-    "MAX_DAILY_USD": "1.00",
+    "MAX_DAILY_USD": "1.50",
     "CLAUDE_MODEL": "claude-sonnet-4-6"
   }
   // Secrets (set in the dashboard, never committed): ADMIN_TOKEN, OPENAI_API_KEY, GEMINI_API_KEY

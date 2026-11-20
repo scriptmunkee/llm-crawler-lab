@@ -14,15 +14,22 @@ export async function enqueue(env: Env, repeats?: number, only?: EngineName, tes
   const engines = ENGINES.filter((e) => isEnabled(env, e) && hasKey(env, e) && (!only || e === only));
   const skipped = ENGINES.filter((e) => !engines.includes(e));
   const stmts: D1PreparedStatement[] = [];
-  for (const p of prompts(c, env.SITE_ORIGIN).filter((x) => !tests || tests.includes(x.test))) {
-    for (const e of engines) {
-      for (let i = 0; i < n; i++) {
+  for (const p of prompts(c, env.SITE_ORIGIN).filter((x) => (tests ? tests.includes(x.test) : x.test !== 't5seed'))) {
+    const reps = p.test === 't5' ? Math.max(1, parseInt(env.T5_REPEATS || '1', 10)) : p.test === 't5seed' ? 1 : n;
+    for (const e of engines.filter((x) => !p.engines || p.engines.includes(x))) {
+      for (let i = 0; i < reps; i++) {
         stmts.push(env.DB.prepare('INSERT INTO jobs (created, batch, prompt_id, engine) VALUES (?, ?, ?, ?)').bind(batch, batch, p.id, e));
       }
     }
   }
   if (stmts.length) await env.DB.batch(stmts);
   return { batch, queued: stmts.length, skipped };
+}
+
+// Test 5: has each seed page had its one seed fetch?
+export async function t5Seeded(env: Env): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT COUNT(DISTINCT prompt_id) n FROM runs WHERE test_id = 't5seed' AND outcome = 'seeded'").first<{ n: number }>();
+  return (row?.n ?? 0) >= 2;
 }
 
 // Estimated spend so far today (UTC), from stored run costs.

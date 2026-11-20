@@ -12,12 +12,20 @@ export interface T4Page {
   publisher: string;    // invented publisher name
 }
 
+export interface T5Page {
+  slug: 'd' | 'e' | 'f';
+  path: string;         // random, unlinked path under /lab/t5/
+  seedEngine: 'openai' | 'gemini' | null;   // the one engine that is shown the URL, once
+  term: string; thing: string; code: string; figure: string; publisher: string;
+}
+
 export interface Canaries {
   created: string;
   indexnowKey: string;
   t1: { html: string; js: string; jsDelayed: string; fetched: string };
   t2: Record<'d301' | 'd302' | 'djs' | 'dmeta' | 'sjs' | 'smeta', string>;
   t4: T4Page[];
+  t5?: T5Page[];
 }
 
 const ALNUM = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -87,7 +95,32 @@ export function generateCanaries(): Canaries {
       sjs: code('SJS'), smeta: code('SMETA'),
     },
     t4,
+    t5: generateT5(),
   };
+}
+
+const T5_THINGS = ['beehive humidity score', 'orchard frost index', 'compost heat grade'];
+
+export function generateT5(): T5Page[] {
+  return (['d', 'e', 'f'] as const).map((slug, i) => ({
+    slug,
+    path: `/lab/t5/${hex(8)}/`,
+    seedEngine: slug === 'd' ? 'openai' : slug === 'e' ? 'gemini' : null,
+    term: inventWord(),
+    thing: T5_THINGS[i],
+    code: code('T5' + slug.toUpperCase()),
+    figure: String(100 + Math.floor(Math.random() * 800)),
+    publisher: `${inventWord()} Growers Circle`,
+  }));
+}
+
+// Adds test 5 canaries to an existing lab without touching the others.
+export async function ensureT5(db: D1Database): Promise<boolean> {
+  const c = await getCanaries(db);
+  if (!c || c.t5) return false;
+  c.t5 = generateT5();
+  await db.prepare('UPDATE settings SET value = ? WHERE key = ?').bind(JSON.stringify(c), 'canaries').run();
+  return true;
 }
 
 export async function getCanaries(db: D1Database): Promise<Canaries | null> {

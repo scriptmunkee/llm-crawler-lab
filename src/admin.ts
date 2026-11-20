@@ -1,4 +1,4 @@
-import { getCanaries, initCanaries } from './canaries';
+import { ensureT5, getCanaries, initCanaries } from './canaries';
 import { ENGINES, hasKey, isEnabled } from './engines';
 import { classify } from './bots';
 import { LAB_URL_PATHS } from './pages';
@@ -63,7 +63,8 @@ export async function handleAdmin(req: Request, env: Env): Promise<Response> {
       await env.DB.prepare("UPDATE runs SET outcome = 'blank answer' WHERE status = 'ok' AND (answer IS NULL OR trim(answer) = '')").run();
       await env.DB.prepare("UPDATE runs SET outcome = 'fetch failed' WHERE status = 'ok' AND error LIKE '%URL_RETRIEVAL_STATUS_ERROR%' AND error NOT LIKE '%URL_RETRIEVAL_STATUS_SUCCESS%' AND detected LIKE '%\"found\":[]%'").run();
       const r = await initCanaries(env.DB);
-      return back(r.created ? 'Lab initialised: schema ready and canaries created.' : `Schema checked and ${upd.length} user agents re-labelled. Canaries unchanged.`);
+      const addedT5 = await ensureT5(env.DB);
+      return back(r.created ? 'Lab initialised: schema ready and canaries created.' : `Schema checked and ${upd.length} user agents re-labelled. ${addedT5 ? 'Test 5 pages created.' : 'Canaries unchanged.'}`);
     }
     if (path === '/admin/run' && isPost) {
       const form = await req.formData().catch(() => null);
@@ -71,6 +72,19 @@ export async function handleAdmin(req: Request, env: Env): Promise<Response> {
       const only = String(form?.get('engine') ?? '') as any;
       const r = await enqueue(env, repeats, (ENGINES as string[]).includes(only) ? only : undefined);
       return back(`Queued ${r.queued} jobs.${r.skipped.length ? ` Not run (switched off or no key): ${r.skipped.join(', ')}.` : ''}`);
+    }
+    if (path === '/admin/seed-t5' && isPost) {
+      await ensureT5(env.DB);
+      const c = await getCanaries(env.DB);
+      const done = await env.DB.prepare("SELECT DISTINCT prompt_id FROM runs WHERE test_id = 't5seed' AND outcome = 'seeded'").all<{ prompt_id: string }>();
+      const have = new Set(done.results.map((x) => x.prompt_id));
+      const todo = (c?.t5 ?? []).filter((p) => p.seedEngine && !have.has(`t5seed-${p.slug}`) && hasKey(env, p.seedEngine) && isEnabled(env, p.seedEngine));
+      const batch = new Date().toISOString();
+      if (todo.length) {
+        await env.DB.batch(todo.map((p) => env.DB.prepare('INSERT INTO jobs (created, batch, prompt_id, engine) VALUES (?, ?, ?, ?)').bind(batch, batch, `t5seed-${p.slug}`, p.seedEngine)));
+        await processJobs(env);
+      }
+      return back(todo.length ? `Seed fetch sent for ${todo.map((p) => `page ${p.slug.toUpperCase()} (${p.seedEngine})`).join(' and ')}. Check Test 5 below.` : 'Both seed pages are already seeded. Nothing sent, so each page keeps exactly one seed fetch.');
     }
     if (path === '/admin/process' && isPost) {
       const n = await processJobs(env);
@@ -159,8 +173,10 @@ async function dashboard(env: Env, msg: string | null): Promise<string> {
   const tl = (s?: string) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
   const dailySet = tl(env.DAILY_TESTS || 't1,t2,t4');
   const weeklySet = tl(env.WEEKLY_TESTS).filter((t) => !dailySet.includes(t));
-  const dailyPrompts = defs.filter((p) => dailySet.includes(p.test)).length;
-  const weeklyPrompts = defs.filter((p) => weeklySet.includes(p.test)).length;
+  const t5r = Math.max(1, parseInt(env.T5_REPEATS || '1', 10));
+  const w = (p: { test: string }) => (p.test === 't5' ? t5r / repeats : 1);
+  const dailyPrompts = defs.filter((p) => dailySet.includes(p.test)).reduce((s, p) => s + w(p), 0);
+  const weeklyPrompts = defs.filter((p) => weeklySet.includes(p.test)).reduce((s, p) => s + w(p), 0);
   const spendRows = spend.results.map((s: any) => [
     esc(s.engine), usd(s.today), usd(s.week), usd(s.month), s.runs, s.searches,
     `${Math.round(s.tin / 1000)}k / ${Math.round(s.tout / 1000)}k`, usd(s.per_run),
@@ -196,6 +212,17 @@ async function dashboard(env: Env, msg: string | null): Promise<string> {
     return pct(rs.filter((r) => (r.outcome ?? '').startsWith('found')).length, rs.length);
   })]);
 
+  // Test 5
+  const t5 = c.t5 ?? [];
+  const t5Seeds = await env.DB.prepare("SELECT prompt_id, engine, ts, outcome FROM runs WHERE test_id = 't5seed' ORDER BY id").all<{ prompt_id: string; engine: string; ts: string; outcome: string }>();
+  const t5Hits = await env.DB.prepare("SELECT path, bot, MIN(ts) first, MAX(ts) last, COUNT(*) n FROM hits WHERE path LIKE '/lab/t5/%' GROUP BY path, bot ORDER BY path, first").all<{ path: string; bot: string; first: string; last: string; n: number }>();
+  const pageOf = (pth: string) => t5.find((p) => p.path === pth)?.slug.toUpperCase() ?? '?';
+  const t5Rows = ON.map((e) => [e, ...t5.map((p) => {
+    const rs = R.filter((r) => r.prompt_id === `t5-${p.slug}` && r.engine === e && r.status === 'ok' && !EXCLUDED.includes(r.outcome ?? ''));
+    return pct(rs.filter((r) => (r.outcome ?? '').startsWith('found')).length, rs.length);
+  })]);
+  const seeded = t5Seeds.results.filter((s) => s.outcome === 'seeded').length >= 2;
+
   // Bot hits
   const hitsByBot = await env.DB.prepare(
     `SELECT bot, bot_group, COUNT(*) n, MAX(ts) last FROM hits WHERE ts > ? GROUP BY bot, bot_group ORDER BY n DESC`,
@@ -210,6 +237,7 @@ async function dashboard(env: Env, msg: string | null): Promise<string> {
     ['T1 HTML', `<code>${c.t1.html}</code>`], ['T1 JS', `<code>${c.t1.js}</code>`], ['T1 JS delayed', `<code>${c.t1.jsDelayed}</code>`], ['T1 fetched', `<code>${c.t1.fetched}</code>`],
     ...Object.entries(c.t2).map(([k, v]) => [`T2 ${k}`, `<code>${v}</code>`] as (string | number)[]),
     ...c.t4.map((p) => [`T4 ${p.slug} (${esc(p.arm)})`, `${esc(p.term)} ${esc(p.thing)} · <code>${p.code}</code>`] as (string | number)[]),
+    ...(c.t5 ?? []).map((p) => [`T5 ${p.slug} (${p.seedEngine ? `seed: ${p.seedEngine}` : 'never seeded'})`, `${esc(p.term)} ${esc(p.thing)} · <code>${p.code}</code> · <code>${esc(p.path)}</code>`] as (string | number)[]),
   ];
 
   body = `
@@ -242,6 +270,17 @@ ${table(['Engine', '301', '302', 'JavaScript', 'Meta refresh'], t2Rows)}</sectio
 ${table(['Page', 'Crawler', 'First crawl', 'Last crawl', 'Fetches'], t4Crawls.results.map((h) => [esc(h.path), esc(h.bot), esc(h.first), esc(h.last), h.n]))}
 <p class="muted">Share of runs where the engine found the page with no URL given.</p>
 ${table(['Engine', 'A: Bing noindex', 'B: Google noindex', 'C: control'], t4Rows)}</section>
+
+<section><h2>Test 5: Does One AI Fetch Get A Page Indexed?</h2>
+<p class="muted">Pages D, E and F are unlinked, left out of every sitemap and sit at random URLs. Page D is opened once by OpenAI, page E once by Gemini, page F never. Each day both engines are asked about all three topics with no URL. Finding D or E but not F means a single user-triggered fetch put the page into that engine's index.</p>
+<p>${seeded ? '<b>Seeded.</b> Daily questions are running.' : '<b>Not seeded yet.</b> Daily questions start the morning after both seed fetches succeed.'}</p>
+<form method="post" action="/admin/seed-t5" class="actions"><button${seeded ? ' class="secondary"' : ''}>Send seed fetches</button></form>
+${table(['Seed', 'Engine', 'When', 'Result'], t5Seeds.results.map((s) => [esc(s.prompt_id.replace('t5seed-', 'Page ').toUpperCase()), esc(s.engine), esc(s.ts), esc(s.outcome)]))}
+<h3>Every visit to the test 5 pages</h3>
+${table(['Page', 'Bot', 'First', 'Last', 'Hits'], t5Hits.results.map((h) => [pageOf(h.path), esc(h.bot), esc(h.first), esc(h.last), h.n]))}
+<h3>Found with no URL given</h3>
+${table(['Engine', ...t5.map((p) => `${p.slug.toUpperCase()}: ${p.seedEngine ? `seeded by ${p.seedEngine}` : 'never seeded'}`)], t5Rows)}
+</section>
 
 <section><h2>Bot Hits (Last 30 Days)</h2>
 ${table(['Bot', 'Group', 'Hits', 'Last seen'], hitsByBot.results.map((h) => [esc(h.bot), esc(h.bot_group), h.n, esc(h.last)]))}

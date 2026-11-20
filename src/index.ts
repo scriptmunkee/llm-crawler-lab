@@ -2,8 +2,8 @@ import { handleAdmin } from './admin';
 import { classify } from './bots';
 import { getCanaries, type Canaries } from './canaries';
 import type { EngineEnv } from './engines';
-import { indexPage, sitemap, t1Page, t1Script, t2Destination, t2JsSource, t2MetaSource, t4Page } from './pages';
-import { enqueue, processJobs, t4Ready } from './runner';
+import { indexPage, sitemap, t1Page, t1Script, t2Destination, t2JsSource, t2MetaSource, t4Page, t5Page } from './pages';
+import { enqueue, processJobs, t4Ready, t5Seeded } from './runner';
 
 export interface Env extends EngineEnv {
   DB: D1Database;
@@ -16,7 +16,8 @@ export interface Env extends EngineEnv {
   DAILY_TESTS?: string;   // tests queued every day, e.g. "t4"
   WEEKLY_TESTS?: string;  // tests queued once a week, e.g. "t1,t2"
   WEEKLY_DAY?: string;    // UTC day for weekly tests, 0 = Sunday, 1 = Monday
-  T4_GATE?: string;       // "crawl": hold test 4 until Googlebot or Bingbot has fetched a test 4 page
+  T4_GATE?: string;
+  T5_REPEATS?: string;    // daily repeats for test 5 questions (default 1)       // "crawl": hold test 4 until Googlebot or Bingbot has fetched a test 4 page
 }
 
 const HTML = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' };
@@ -77,6 +78,12 @@ async function labResponse(req: Request, env: Env, c: Canaries | null): Promise<
     if (html) return new Response(html, { headers: HTML });
   }
 
+  // Test 5: unlinked pages at random paths
+  if (path.startsWith('/lab/t5/')) {
+    const html = t5Page(o, c, path);
+    if (html) return new Response(html, { headers: HTML });
+  }
+
   // Add the trailing slash the main site uses everywhere
   if (!path.endsWith('/') && !/\.[a-z0-9]+$/i.test(path)) return Response.redirect(`${o}${path}/`, 301);
 
@@ -102,8 +109,8 @@ export default {
       const list = (s?: string) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
       const tests = list(env.DAILY_TESTS || 't1,t2,t4');
       if (new Date(event.scheduledTime).getUTCDay() === parseInt(env.WEEKLY_DAY || '1', 10)) tests.push(...list(env.WEEKLY_TESTS));
-      ctx.waitUntil(t4Ready(env).then((ready) => {
-        const run = [...new Set(tests)].filter((t) => t !== 't4' || ready);
+      ctx.waitUntil(Promise.all([t4Ready(env), t5Seeded(env)]).then(([ready, seeded]) => {
+        const run = [...new Set(tests)].filter((t) => (t !== 't4' || ready) && (t !== 't5' || seeded));
         return run.length ? enqueue(env, undefined, undefined, run) : null;
       }).then(() => processJobs(env)).catch(() => {}));
     } else {
