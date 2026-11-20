@@ -70,7 +70,8 @@ export async function handleAdmin(req: Request, env: Env): Promise<Response> {
       const form = await req.formData().catch(() => null);
       const repeats = parseInt(String(form?.get('repeats') ?? '1'), 10) || 1;
       const only = String(form?.get('engine') ?? '') as any;
-      const r = await enqueue(env, repeats, (ENGINES as string[]).includes(only) ? only : undefined);
+      const tests = String(form?.get('tests') ?? '').split(',').map((s) => s.trim()).filter((s) => ['t1', 't2', 't4', 't5'].includes(s));
+      const r = await enqueue(env, repeats, (ENGINES as string[]).includes(only) ? only : undefined, tests.length ? tests : undefined);
       return back(`Queued ${r.queued} jobs.${r.skipped.length ? ` Not run (switched off or no key): ${r.skipped.join(', ')}.` : ''}`);
     }
     if (path === '/admin/seed-t5' && isPost) {
@@ -274,7 +275,8 @@ ${table(['Engine', 'A: Bing noindex', 'B: Google noindex', 'C: control'], t4Rows
 <section><h2>Test 5: Does One AI Fetch Get A Page Indexed?</h2>
 <p class="muted">Pages D, E and F are unlinked, left out of every sitemap and sit at random URLs. Page D is opened once by OpenAI, page E once by Gemini, page F never. Each day both engines are asked about all three topics with no URL. Finding D or E but not F means a single user-triggered fetch put the page into that engine's index.</p>
 <p>${seeded ? '<b>Seeded.</b> Daily questions are running.' : '<b>Not seeded yet.</b> Daily questions start the morning after both seed fetches succeed.'}</p>
-<form method="post" action="/admin/seed-t5" class="actions"><button${seeded ? ' class="secondary"' : ''}>Send seed fetches</button></form>
+<div class="actions"><form method="post" action="/admin/seed-t5"><button${seeded ? ' class="secondary"' : ''}>Send seed fetches</button></form>
+${seeded ? '<form method="post" action="/admin/run"><input type="hidden" name="repeats" value="1"><input type="hidden" name="tests" value="t5"><button class="secondary">Ask the test 5 questions now</button></form>' : ''}</div>
 ${table(['Seed', 'Engine', 'When', 'Result'], t5Seeds.results.map((s) => [esc(s.prompt_id.replace('t5seed-', 'Page ').toUpperCase()), esc(s.engine), esc(s.ts), esc(s.outcome)]))}
 <h3>Every visit to the test 5 pages</h3>
 ${table(['Page', 'Bot', 'First', 'Last', 'Hits'], t5Hits.results.map((h) => [pageOf(h.path), esc(h.bot), esc(h.first), esc(h.last), h.n]))}
