@@ -87,7 +87,9 @@ export async function processJobs(env: Env, limit?: number): Promise<number> {
       await env.DB.prepare("UPDATE jobs SET status = 'done' WHERE id = ?").bind(job.id).run();
     } catch (err: any) {
       const msg = String(err?.message ?? err).slice(0, 1000);
-      const retry = job.attempts + 1 < 3 && /^(429|5\d\d)/.test(msg);
+      // Gemini refuses some Cloudflare data centres ("User location is not supported").
+      // The next queue run usually starts somewhere else, so treat it like a 429.
+      const retry = job.attempts + 1 < 3 && (/^(429|5\d\d)/.test(msg) || /location is not supported/i.test(msg));
       await env.DB.prepare('UPDATE jobs SET status = ? WHERE id = ?').bind(retry ? 'pending' : 'failed', job.id).run();
       if (!retry) {
         await env.DB.prepare(
